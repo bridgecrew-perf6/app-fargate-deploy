@@ -1,0 +1,49 @@
+---
+    kind: pipeline
+    type: docker
+    name: default
+    
+    steps:
+    - name: publish
+      image: plugins/ecr
+      environment:
+        AWS_ACCESS_KEY_ID:
+          from_secret: AWS_ACCESS_KEY_ID
+        AWS_SECRET_ACCESS_KEY:
+          from_secret: AWS_SECRET_ACCESS_KEY
+      settings:
+        access_key: ${AWS_ACCESS_KEY_ID}
+        secret_key: ${AWS_SECRET_ACCESS_KEY}
+        repo: app
+        registry: 111111111111111.dkr.ecr.us-east-1.amazonaws.com
+        tags:
+          - latest
+          - ${DRONE_COMMIT_SHA}
+    - name: deploy-dev
+      image: hashicorp/terraform:0.12.24
+      environment:
+        AWS_ACCESS_KEY_ID:
+          from_secret: AWS_ACCESS_KEY_ID
+        AWS_SECRET_ACCESS_KEY:
+          from_secret: AWS_SECRET_ACCESS_KEY
+        AWS_DEFAULT_REGION:
+          from_secret: AWS_DEFAULT_REGION
+        SSH_PRIV_KEY:
+          from_secret: SSH_PRIV_KEY
+      commands:
+        - echo "$SSH_PRIV_KEY" | tr -d '\r' > /root/id_rsa
+        - chmod 400 /root/id_rsa
+        - eval `ssh-agent -s`
+        - ssh-add /root/id_rsa
+        - echo "AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID" >> .env.aws
+        - echo "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY" >> .env.aws
+        - mkdir ~/.ssh/
+        - ssh-keyscan -t rsa github.com >> ~/.ssh/known_hosts
+        - terraform init
+        - export TF_VAR_APP_VERSION=$DRONE_COMMIT_SHA ; terraform plan -out=tfplan
+        - export TF_VAR_APP_VERSION=$DRONE_COMMIT_SHA ; terraform apply "tfplan"
+    
+    volumes:
+    - name: cache
+      temp: {}
+    
